@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "648134564666",
+    "project_id": "sme-readiblity",
+    "storage_bucket": "sme-readiblity.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:648134564666:android:a6f383232a86f473aa8e03",
+        "android_client_info": {
+          "package_name": "COM.LASTON.BOUREADIBILITY"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB6iBrytDxm7gUyHhoco5QXwLlDGiRgdHM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

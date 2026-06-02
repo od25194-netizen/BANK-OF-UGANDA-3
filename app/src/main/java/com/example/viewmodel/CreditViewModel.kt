@@ -12,8 +12,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import android.util.Log
+import com.google.firebase.auth.FirebaseAuth
 
 enum class AppScreen {
+    Auth,
     Landing,
     Form,
     Loading,
@@ -23,8 +25,118 @@ enum class AppScreen {
 class CreditViewModel : ViewModel() {
     private val TAG = "CreditViewModel"
 
-    private val _currentScreen = MutableStateFlow(AppScreen.Landing)
+    private val _currentScreen = MutableStateFlow(AppScreen.Auth)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
+
+    private val firebaseAuth: FirebaseAuth? by lazy {
+        try {
+            FirebaseAuth.getInstance()
+        } catch (e: Exception) {
+            Log.e("CreditViewModel", "Firebase App not initialized or missing config, operating in Demo Auth Mode.", e)
+            null
+        }
+    }
+
+    private val _currentUserEmail = MutableStateFlow<String?>(null)
+    val currentUserEmail: StateFlow<String?> = _currentUserEmail.asStateFlow()
+
+    private val _authError = MutableStateFlow<String?>(null)
+    val authError: StateFlow<String?> = _authError.asStateFlow()
+
+    private val _authLoading = MutableStateFlow(false)
+    val authLoading: StateFlow<Boolean> = _authLoading.asStateFlow()
+
+    init {
+        try {
+            val auth = firebaseAuth
+            if (auth?.currentUser != null) {
+                _currentUserEmail.value = auth.currentUser?.email
+                _currentScreen.value = AppScreen.Landing
+            } else {
+                _currentScreen.value = AppScreen.Auth
+            }
+        } catch (e: Exception) {
+            _currentScreen.value = AppScreen.Auth
+        }
+    }
+
+    fun clearAuthError() {
+        _authError.value = null
+    }
+
+    fun signIn(email: String, password: String, onSuccess: () -> Unit) {
+        _authLoading.value = true
+        _authError.value = null
+        val auth = firebaseAuth
+        if (auth != null) {
+            auth.signInWithEmailAndPassword(email, password)
+                .addOnCompleteListener { task ->
+                    _authLoading.value = false
+                    if (task.isSuccessful) {
+                        _currentUserEmail.value = auth.currentUser?.email ?: email
+                        _currentScreen.value = AppScreen.Landing
+                        onSuccess()
+                    } else {
+                        _authError.value = task.exception?.localizedMessage ?: "Invalid login credentials."
+                    }
+                }
+        } else {
+            // Local fallback demo auth mode if firebase init failed or throws
+            viewModelScope.launch {
+                delay(1200)
+                _authLoading.value = false
+                if (email.contains("@") && password.length >= 6) {
+                    _currentUserEmail.value = email
+                    _currentScreen.value = AppScreen.Landing
+                    onSuccess()
+                } else {
+                    _authError.value = "Demo Mode: Email must contain '@' and Password must be at least 6 characters."
+                }
+            }
+        }
+    }
+
+    fun signUp(email: String, password: String, onSuccess: () -> Unit) {
+        _authLoading.value = true
+        _authError.value = null
+        val auth = firebaseAuth
+        if (auth != null) {
+            auth.createUserWithEmailAndPassword(email, password)
+                .addOnCompleteListener { task ->
+                    _authLoading.value = false
+                    if (task.isSuccessful) {
+                        _currentUserEmail.value = auth.currentUser?.email ?: email
+                        _currentScreen.value = AppScreen.Landing
+                        onSuccess()
+                    } else {
+                        _authError.value = task.exception?.localizedMessage ?: "Sign up failed."
+                    }
+                }
+        } else {
+            // Local fallback demo auth mode
+            viewModelScope.launch {
+                delay(1200)
+                _authLoading.value = false
+                if (email.contains("@") && password.length >= 6) {
+                    _currentUserEmail.value = email
+                    _currentScreen.value = AppScreen.Landing
+                    onSuccess()
+                } else {
+                    _authError.value = "Demo Mode: Email must contain '@' and Password must be at least 6 characters."
+                }
+            }
+        }
+    }
+
+    fun signOut() {
+        try {
+            firebaseAuth?.signOut()
+        } catch (e: Exception) {
+            Log.e(TAG, "Sign out error", e)
+        }
+        _currentUserEmail.value = null
+        _currentScreen.value = AppScreen.Auth
+    }
 
     private val _currentFormStep = MutableStateFlow(1) // 1 to 4
     val currentFormStep: StateFlow<Int> = _currentFormStep.asStateFlow()

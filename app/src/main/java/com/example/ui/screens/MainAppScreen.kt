@@ -36,9 +36,14 @@ import com.example.model.CreditAssessmentResult
 import com.example.model.Pillar
 import com.example.model.RoadmapStep
 import com.example.model.LoanMatch
+import kotlinx.coroutines.launch
 import com.example.ui.theme.*
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.CreditViewModel
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 
 @Composable
 fun MainAppScreen(
@@ -50,6 +55,9 @@ fun MainAppScreen(
     val currentStep by viewModel.currentFormStep.collectAsState()
     val isAnalyzingMessage by viewModel.isAnalyzingMessage.collectAsState()
     val result by viewModel.assessmentResult.collectAsState()
+    val authError by viewModel.authError.collectAsState()
+    val authLoading by viewModel.authLoading.collectAsState()
+    val userEmail by viewModel.currentUserEmail.collectAsState()
 
     val context = LocalContext.current
 
@@ -59,7 +67,26 @@ fun MainAppScreen(
     ) {
         Crossfade(targetState = currentScreen, label = "ScreenTransition") { screen ->
             when (screen) {
+                AppScreen.Auth -> AuthScreen(
+                    isLoading = authLoading,
+                    errorMessage = authError,
+                    onSignIn = { email, password ->
+                        viewModel.clearAuthError()
+                        viewModel.signIn(email, password) {
+                            Toast.makeText(context, "Welcome to SME CreditReady!", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onSignUp = { email, password ->
+                        viewModel.clearAuthError()
+                        viewModel.signUp(email, password) {
+                            Toast.makeText(context, "Welcome! Your SME CreditReady account is ready.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onClearError = { viewModel.clearAuthError() }
+                )
                 AppScreen.Landing -> LandingScreen(
+                    userEmail = userEmail,
+                    onSignOut = { viewModel.signOut() },
                     onStart = { viewModel.startAssessment() },
                     onQuickDemo = { viewModel.quickDemo() }
                 )
@@ -87,6 +114,8 @@ fun MainAppScreen(
 
 @Composable
 fun LandingScreen(
+    userEmail: String?,
+    onSignOut: () -> Unit,
     onStart: () -> Unit,
     onQuickDemo: () -> Unit
 ) {
@@ -106,6 +135,43 @@ fun LandingScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Top Toolbar Row for User Session
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Logged in as:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.LightGray.copy(alpha = 0.8f)
+                )
+                Text(
+                    text = userEmail ?: "Guest User",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(
+                onClick = onSignOut,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.15f))
+                    .size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ExitToApp,
+                    contentDescription = "Sign Out",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(40.dp))
 
         // Badge: BoU 60th Context
@@ -1624,6 +1690,8 @@ fun ResultsDashboardScreen(
                         }
                     }
 
+                    WhatIfEligibilitySimulator(answers = answers, currentScore = result.overall_score)
+
                     // Summary Text block
                     Text(
                         text = "EXECUTIVE SUMMARY",
@@ -1829,10 +1897,32 @@ fun DoubleRingGauge(
     grade: String,
     modifier: Modifier = Modifier
 ) {
+    // High performance gauge load animations
+    val animProgressCurrent = remember { Animatable(0f) }
+    val animProgressPotential = remember { Animatable(0f) }
+    
+    LaunchedEffect(currentScore, potentialScore) {
+        launch {
+            animProgressCurrent.animateTo(
+                targetValue = currentScore.toFloat(),
+                animationSpec = tween(durationMillis = 1500, easing = FastOutSlowInEasing)
+            )
+        }
+        launch {
+            animProgressPotential.animateTo(
+                targetValue = potentialScore.toFloat(),
+                animationSpec = tween(durationMillis = 1700, easing = FastOutSlowInEasing)
+            )
+        }
+    }
+
+    val animatedScore = animProgressCurrent.value.toInt()
+    val animatedPotential = animProgressPotential.value
+
     // Determine status color based on score value
     val gaugeColor = when {
-        currentScore < 40 -> RatingRed
-        currentScore < 70 -> RatingAmber
+        animatedScore < 40 -> RatingRed
+        animatedScore < 70 -> RatingAmber
         else -> RatingGreen
     }
 
@@ -1857,7 +1947,7 @@ fun DoubleRingGauge(
             )
 
             // Draw potential improved ghost ring in gold
-            val improvedSweepAngle = (potentialScore / 100f) * 270f
+            val improvedSweepAngle = (animatedPotential / 100f) * 270f
             drawArc(
                 color = GoldAccent.copy(alpha = 0.4f),
                 startAngle = 135f,
@@ -1869,7 +1959,7 @@ fun DoubleRingGauge(
             )
 
             // Draw active/current score progress ring
-            val currentSweepAngle = (currentScore / 100f) * 270f
+            val currentSweepAngle = (animProgressCurrent.value / 100f) * 270f
             drawArc(
                 color = gaugeColor,
                 startAngle = 135f,
@@ -1884,7 +1974,7 @@ fun DoubleRingGauge(
         // Grade label details centered inside the dial gauge
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = currentScore.toString(),
+                text = animatedScore.toString(),
                 style = MaterialTheme.typography.displayMedium,
                 fontWeight = FontWeight.Black,
                 color = TextDark
@@ -2152,6 +2242,21 @@ fun RoadmapStepItem(step: RoadmapStep) {
 fun LenderMatchCard(match: LoanMatch) {
     val badgeColor = if (match.eligible_now) RatingGreen else RatingAmber
     val iconVector = if (match.eligible_now) Icons.Default.CheckCircle else Icons.Default.Warning
+    val context = LocalContext.current
+
+    // Helper to get lender initials and secondary bg color
+    val (initials, avatarBg) = when {
+        match.lender.contains("MTN", ignoreCase = true) -> "MTN" to Color(0xFFFDB913)
+        match.lender.contains("Pride", ignoreCase = true) -> "PM" to Color(0xFF1E3A8A)
+        match.lender.contains("Post", ignoreCase = true) -> "PB" to Color(0xFFC026D3)
+        match.lender.contains("Centenary", ignoreCase = true) -> "CB" to Color(0xFF0284C7)
+        else -> {
+            val words = match.lender.split(" ")
+            val first = words.getOrNull(0)?.firstOrNull()?.toString() ?: ""
+            val second = words.getOrNull(1)?.firstOrNull()?.toString() ?: ""
+            (first + second).uppercase() to ForestGreen
+        }
+    }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = SurfaceLight),
@@ -2166,19 +2271,44 @@ fun LenderMatchCard(match: LoanMatch) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = match.lender,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = ForestGreenDark
-                    )
-                    Text(
-                        text = match.product,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextDark.copy(alpha = 0.7f)
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1.5f)
+                ) {
+                    // Circle Logo Avatar
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(avatarBg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = initials,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (initials == "MTN") Color.Black else Color.White
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column {
+                        Text(
+                            text = match.lender,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = ForestGreenDark
+                        )
+                        Text(
+                            text = match.product,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextDark.copy(alpha = 0.7f)
+                        )
+                    }
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 // Match Status badge
                 Card(
@@ -2186,7 +2316,7 @@ fun LenderMatchCard(match: LoanMatch) {
                     shape = RoundedCornerShape(100.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -2266,7 +2396,507 @@ fun LenderMatchCard(match: LoanMatch) {
                         )
                     }
                 }
+            } else {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        Toast.makeText(
+                            context,
+                            "SECURE MATCH TRANSMITTED! SME CreditReady has safely shared your certified readiness scorecard with the loan officer at ${match.lender}.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Request Access",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Request Warm Introduction",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+fun WhatIfEligibilitySimulator(answers: BusinessAnswers, currentScore: Int) {
+    var isRegistered by remember { mutableStateOf(answers.isRegistered) }
+    var hasBankStatements by remember { mutableStateOf(answers.hasBankStatement) }
+    var keepRecords by remember { mutableStateOf(answers.recordKeeping == "yes" || answers.recordKeeping == "sometimes") }
+    var useMoMo by remember { mutableStateOf(answers.mobileMoneyUsage != "none") }
+
+    // Start with current score, add simulated improvements
+    val simulatedScore = remember(isRegistered, hasBankStatements, keepRecords, useMoMo) {
+        var score = currentScore
+        // Simulate changes
+        if (isRegistered && !answers.isRegistered) score += 15
+        if (hasBankStatements && !answers.hasBankStatement) score += 12
+        if (keepRecords && !(answers.recordKeeping == "yes" || answers.recordKeeping == "sometimes")) score += 10
+        if (useMoMo && answers.mobileMoneyUsage == "none") score += 10
+        score.coerceIn(0, 100)
+    }
+
+    val simulatedGrade = when {
+        simulatedScore < 40 -> "F"
+        simulatedScore < 50 -> "D"
+        simulatedScore < 60 -> "C"
+        simulatedScore < 70 -> "C+"
+        simulatedScore < 80 -> "B"
+        simulatedScore < 90 -> "B+"
+        else -> "A"
+    }
+
+    val statusColor = when {
+        simulatedScore < 40 -> RatingRed
+        simulatedScore < 70 -> RatingAmber
+        else -> RatingGreen
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 24.dp),
+        border = BorderStroke(1.5.dp, GoldAccent.copy(alpha = 0.3f))
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "WHAT-IF ELIGIBILITY SIMULATOR",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = GoldAccentDark,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Simulate action plans to see your future score",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = statusColor.copy(alpha = 0.1f)),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, statusColor)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "$simulatedScore/100",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = statusColor
+                        )
+                        Text(
+                            text = "Grade $simulatedGrade",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = statusColor
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Checkbox options
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isRegistered = !isRegistered }
+                    .padding(vertical = 4.dp)
+            ) {
+                Checkbox(
+                    checked = isRegistered,
+                    onCheckedChange = { isRegistered = it },
+                    colors = CheckboxDefaults.colors(checkedColor = ForestGreen)
+                )
+                Text(
+                    text = "URSB Name Registration (+15 pts)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (isRegistered) FontWeight.Bold else FontWeight.Normal,
+                    color = TextDark,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { hasBankStatements = !hasBankStatements }
+                    .padding(vertical = 4.dp)
+            ) {
+                Checkbox(
+                    checked = hasBankStatements,
+                    onCheckedChange = { hasBankStatements = it },
+                    colors = CheckboxDefaults.colors(checkedColor = ForestGreen)
+                )
+                Text(
+                    text = "Submit bank statements logs (+12 pts)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (hasBankStatements) FontWeight.Bold else FontWeight.Normal,
+                    color = TextDark,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { keepRecords = !keepRecords }
+                    .padding(vertical = 4.dp)
+            ) {
+                Checkbox(
+                    checked = keepRecords,
+                    onCheckedChange = { keepRecords = it },
+                    colors = CheckboxDefaults.colors(checkedColor = ForestGreen)
+                )
+                Text(
+                    text = "Regular sales/expense bookkeeping (+10 pts)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (keepRecords) FontWeight.Bold else FontWeight.Normal,
+                    color = TextDark,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { useMoMo = !useMoMo }
+                    .padding(vertical = 4.dp)
+            ) {
+                Checkbox(
+                    checked = useMoMo,
+                    onCheckedChange = { useMoMo = it },
+                    colors = CheckboxDefaults.colors(checkedColor = ForestGreen)
+                )
+                Text(
+                    text = "High business mobile money velocity (+10 pts)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (useMoMo) FontWeight.Bold else FontWeight.Normal,
+                    color = TextDark,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AuthScreen(
+    isLoading: Boolean,
+    errorMessage: String?,
+    onSignIn: (String, String) -> Unit,
+    onSignUp: (String, String) -> Unit,
+    onClearError: () -> Unit
+) {
+    var isLoginMode by remember { mutableStateOf(true) }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    val scrollState = rememberScrollState()
+    val context = LocalContext.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(ForestGreenDark, BackgroundLight),
+                    startY = 0f,
+                    endY = 1000f
+                )
+            )
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Spacer(modifier = Modifier.height(48.dp))
+
+        // SME CreditReady Branding Header
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(GoldAccent),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = "SME CreditReady Key Logo",
+                tint = ForestGreenDark,
+                modifier = Modifier.size(40.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "SME CreditReady",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            color = Color.White,
+            textAlign = TextAlign.Center
+        )
+
+        Text(
+            text = "Certified Bankability Scoring & Lead Matchmaking",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.LightGray.copy(alpha = 0.8f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Main Auth Fields Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, GoldAccent.copy(alpha = 0.25f))
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = if (isLoginMode) "Welcome Back" else "Create SME Account",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = TextDark
+                )
+
+                Text(
+                    text = if (isLoginMode) "Sign in to access your business score" else "Register to certify your business leads",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 20.dp)
+                )
+
+                if (errorMessage != null) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = RatingRed.copy(alpha = 0.12f)),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, RatingRed.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = "Error detail",
+                                tint = RatingRed,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = errorMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RatingRed,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = onClearError,
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss error",
+                                    tint = RatingRed,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Email input
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it; onClearError() },
+                    label = { Text("Business Email Address") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Email,
+                            contentDescription = "Email address icon",
+                            tint = ForestGreen
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("auth_email_input"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = ForestGreen,
+                        focusedLabelColor = ForestGreen,
+                        unfocusedBorderColor = Color.LightGray
+                    ),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Password input
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it; onClearError() },
+                    label = { Text("Password (min 6 characters)") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Password shield icon",
+                            tint = ForestGreen
+                        )
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Default.CheckCircle else Icons.Default.Info,
+                                contentDescription = "Toggle password view",
+                                tint = Color.Gray
+                            )
+                        }
+                    },
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("auth_password_input"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = ForestGreen,
+                        focusedLabelColor = ForestGreen,
+                        unfocusedBorderColor = Color.LightGray
+                    ),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Submit Action Button
+                Button(
+                    onClick = {
+                        if (email.isBlank() || password.isBlank()) {
+                            Toast.makeText(context, "Please fill in all details", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (password.length < 6) {
+                            Toast.makeText(context, "Password must be at least 6 characters", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (isLoginMode) {
+                            onSignIn(email.trim(), password)
+                        } else {
+                            onSignUp(email.trim(), password)
+                        }
+                    },
+                    enabled = !isLoading,
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("auth_submit_button")
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.5.dp
+                        )
+                    } else {
+                        Text(
+                            text = if (isLoginMode) "Access Profile" else "Register Business",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Toggle Auth Mode text Link
+                TextButton(
+                    onClick = {
+                        isLoginMode = !isLoginMode
+                        onClearError()
+                    },
+                    modifier = Modifier.testTag("toggle_auth_mode_button")
+                ) {
+                    Text(
+                        text = if (isLoginMode) "New user? Create a free account" else "Have an account already? Access profile",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = ForestGreenDark,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Security footer
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = "Secured encrypted session",
+                tint = Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "Secure session encrypted by Google GMS",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.6f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
     }
 }
