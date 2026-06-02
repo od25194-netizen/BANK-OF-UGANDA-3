@@ -1,0 +1,6 @@
+{
+  "name": "SME CreditReady",
+  "description": "An AI-powered credit readiness coach for Ugandan small business owners.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
