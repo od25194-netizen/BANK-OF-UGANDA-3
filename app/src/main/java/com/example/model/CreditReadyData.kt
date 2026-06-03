@@ -9,6 +9,7 @@ data class BusinessAnswers(
     val operatingTime: String = "",
     val employeeCount: String = "",
     val isRegistered: Boolean = false,
+    val district: String = "Kampala",
     
     // Step 2: Your money
     val monthlyRevenue: String = "",
@@ -36,6 +37,7 @@ data class BusinessAnswers(
             - Operating Time: $operatingTime
             - Employee Count: $employeeCount
             - Registered with URSB: ${if (isRegistered) "Yes" else "No"}
+            - Operating District: $district
             
             Financial Details:
             - Monthly Revenue Range: $monthlyRevenue

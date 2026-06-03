@@ -8,6 +8,8 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.example.ui.screens.MainAppScreen
 import com.example.ui.theme.MyApplicationTheme
@@ -20,7 +22,10 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     setContent {
-      MyApplicationTheme {
+      val isDarkThemePref by viewModel.isDarkTheme.collectAsState()
+      val isDark = isDarkThemePref ?: androidx.compose.foundation.isSystemInDarkTheme()
+
+      MyApplicationTheme(darkTheme = isDark) {
         Scaffold(
           modifier = Modifier
             .fillMaxSize()

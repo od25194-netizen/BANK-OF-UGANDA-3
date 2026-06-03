@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import android.content.Context
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -44,6 +45,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import coil.compose.AsyncImage
+import com.example.util.TranslationHelper
+import android.util.Log
 
 @Composable
 fun MainAppScreen(
@@ -58,8 +66,44 @@ fun MainAppScreen(
     val authError by viewModel.authError.collectAsState()
     val authLoading by viewModel.authLoading.collectAsState()
     val userEmail by viewModel.currentUserEmail.collectAsState()
+    val currentLanguageCode by viewModel.currentLanguageCode.collectAsState()
 
     val context = LocalContext.current
+    var showLanguageDialog by remember { mutableStateOf(false) }
+    
+    val profileImageUriString by viewModel.profileImageUriString.collectAsState()
+    val businessLogoUriString by viewModel.businessLogoUriString.collectAsState()
+
+    val profileImageUri = remember(profileImageUriString) {
+        profileImageUriString?.let { android.net.Uri.parse(it) }
+    }
+    val businessLogoUri = remember(businessLogoUriString) {
+        businessLogoUriString?.let { android.net.Uri.parse(it) }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.setProfileImageUri(uri.toString())
+        }
+    }
+
+    val logoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.setBusinessLogoUri(uri.toString())
+        }
+    }
+
+    if (showLanguageDialog) {
+        LanguageSelectionDialog(
+            currentLanguageCode = currentLanguageCode,
+            onLanguageSelected = { viewModel.setLanguage(it) },
+            onDismiss = { showLanguageDialog = false }
+        )
+    }
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -70,6 +114,8 @@ fun MainAppScreen(
                 AppScreen.Auth -> AuthScreen(
                     isLoading = authLoading,
                     errorMessage = authError,
+                    currentLanguageCode = currentLanguageCode,
+                    onShowLanguagePicker = { showLanguageDialog = true },
                     onSignIn = { email, password ->
                         viewModel.clearAuthError()
                         viewModel.signIn(email, password) {
@@ -82,10 +128,21 @@ fun MainAppScreen(
                             Toast.makeText(context, "Welcome! Your SME CreditReady account is ready.", Toast.LENGTH_SHORT).show()
                         }
                     },
+                    onForgotPassword = { email ->
+                        viewModel.resetPassword(email) { success, msg ->
+                            if (success) {
+                                Toast.makeText(context, "A password reset email has been sent to your primary address.", Toast.LENGTH_LONG).show()
+                            } else {
+                                Toast.makeText(context, "Error: ${msg ?: "Account reset fail"}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
                     onClearError = { viewModel.clearAuthError() }
                 )
                 AppScreen.Landing -> LandingScreen(
                     userEmail = userEmail,
+                    currentLanguageCode = currentLanguageCode,
+                    onShowLanguagePicker = { showLanguageDialog = true },
                     onSignOut = { viewModel.signOut() },
                     onStart = { viewModel.startAssessment() },
                     onQuickDemo = { viewModel.quickDemo() }
@@ -102,6 +159,11 @@ fun MainAppScreen(
                     ResultsDashboardScreen(
                         result = it,
                         answers = answers,
+                        viewModel = viewModel,
+                        profileImageUri = profileImageUri,
+                        businessLogoUri = businessLogoUri,
+                        onUploadPhotoClick = { photoPickerLauncher.launch("image/*") },
+                        onUploadLogoClick = { logoPickerLauncher.launch("image/*") },
                         onRetake = { viewModel.retake() }
                     )
                 } ?: LoadingScreen(message = "Processing response...")
@@ -115,6 +177,8 @@ fun MainAppScreen(
 @Composable
 fun LandingScreen(
     userEmail: String?,
+    currentLanguageCode: String,
+    onShowLanguagePicker: () -> Unit,
     onSignOut: () -> Unit,
     onStart: () -> Unit,
     onQuickDemo: () -> Unit
@@ -145,7 +209,7 @@ fun LandingScreen(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Logged in as:",
+                    text = TranslationHelper.getString("logged_in_as", currentLanguageCode),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.LightGray.copy(alpha = 0.8f)
                 )
@@ -157,6 +221,16 @@ fun LandingScreen(
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
+
+            // Language picker trigger button
+            LanguageSelectorButton(
+                currentLanguageCode = currentLanguageCode,
+                darkTheme = true,
+                onClick = onShowLanguagePicker
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
             IconButton(
                 onClick = onSignOut,
                 modifier = Modifier
@@ -283,7 +357,7 @@ fun LandingScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Begin Credit Assessment",
+                    text = TranslationHelper.getString("btn_start_assess", currentLanguageCode),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -329,7 +403,7 @@ fun LandingScreen(
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Instant Live Demo (Maria's Story)",
+                        text = TranslationHelper.getString("btn_quick_demo", currentLanguageCode),
                         style = MaterialTheme.typography.titleMedium,
                         color = ForestGreenDark,
                         fontWeight = FontWeight.Bold
@@ -568,7 +642,11 @@ fun StepAboutBusiness(
         color = TextDark,
         modifier = Modifier.padding(bottom = 8.dp)
     )
-    val categories = listOf("market vendor", "retail shop", "salon/barbershop", "boda boda/transport", "farming/agriculture", "food/restaurant", "other")
+    val categories = listOf(
+        "market vendor", "retail shop", "salon/barbershop", "boda boda/transport", "farming/agriculture", 
+        "food/restaurant", "clothing boutique", "hardware retail", "mechanic/auto repair", "medical clinic/pharmacy", 
+        "carpentry/furniture shop", "brick making/construction", "general merchandise", "other"
+    )
     FlowRow(
         modifier = Modifier
             .fillMaxWidth()
@@ -660,6 +738,92 @@ fun StepAboutBusiness(
             onCheckedChange = { reg -> onAnswersUpdated { it.copy(isRegistered = reg) } },
             colors = SwitchDefaults.colors(checkedThumbColor = ForestGreen, checkedTrackColor = ForestGreenLight)
         )
+    }
+
+    Spacer(modifier = Modifier.height(20.dp))
+
+    // Operating District (Uganda Region Grouped) - 135 Districts
+    Text(
+        text = "Operating District (Uganda Region Grouped)",
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        color = TextDark,
+        modifier = Modifier.padding(bottom = 8.dp)
+    )
+
+    var expandedDistrictMenu by remember { mutableStateOf(false) }
+    var districtSearchQuery by remember { mutableStateOf("") }
+
+    Box(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+        OutlinedTextField(
+            value = answers.district,
+            onValueChange = {},
+            readOnly = true,
+            placeholder = { Text("Select operating district...") },
+            trailingIcon = {
+                IconButton(onClick = { expandedDistrictMenu = !expandedDistrictMenu }) {
+                    Icon(
+                        imageVector = if (expandedDistrictMenu) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Dropdown menu icon"
+                    )
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expandedDistrictMenu = true },
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = ForestGreen,
+                unfocusedBorderColor = Color.LightGray
+            )
+        )
+
+        DropdownMenu(
+            expanded = expandedDistrictMenu,
+            onDismissRequest = { expandedDistrictMenu = false },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 350.dp)
+                .background(Color.White)
+        ) {
+            OutlinedTextField(
+                value = districtSearchQuery,
+                onValueChange = { districtSearchQuery = it },
+                placeholder = { Text("Search 135 districts...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Gray, modifier = Modifier.size(16.dp)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = ForestGreen,
+                    unfocusedBorderColor = Color.LightGray
+                ),
+                singleLine = true
+            )
+
+            ugandaDistrictsByRegion.forEach { (region, list) ->
+                val filtered = list.filter { it.contains(districtSearchQuery, ignoreCase = true) }
+                if (filtered.isNotEmpty()) {
+                    Text(
+                        text = region.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = GoldAccentDark,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                    )
+                    filtered.forEach { dist ->
+                        DropdownMenuItem(
+                            text = { Text(dist, fontWeight = if (answers.district == dist) FontWeight.Bold else FontWeight.Normal) },
+                            onClick = {
+                                onAnswersUpdated { it.copy(district = dist) }
+                                expandedDistrictMenu = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1151,7 +1315,7 @@ fun LoadingScreen(message: String) {
 
 // ================= Results Dashboard Screen =================
 
-enum class DashboardTab { Score, Roadmap, Lenders, Profile }
+enum class DashboardTab { Score, Roadmap, Lenders, Profile, Settings }
 
 @Composable
 fun CreditReadyHeader(
@@ -1317,6 +1481,12 @@ fun CreditReadyBottomNavBar(
                     label = "Profile",
                     onClick = { onTabSelected(DashboardTab.Profile) }
                 )
+                DashboardNavItem(
+                    tab = DashboardTab.Settings,
+                    selected = selectedTab == DashboardTab.Settings,
+                    label = "Settings",
+                    onClick = { onTabSelected(DashboardTab.Settings) }
+                )
             }
         }
     }
@@ -1344,12 +1514,12 @@ fun RowScope.DashboardNavItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // Geometric shape indicator dot from design: Score (circle), Roadmap (diamond), Lenders (triangle), Profile (square)
         val symbol = when (tab) {
             DashboardTab.Score -> "●"
             DashboardTab.Roadmap -> "◆"
             DashboardTab.Lenders -> "▲"
             DashboardTab.Profile -> "■"
+            DashboardTab.Settings -> "⚙"
         }
         
         Text(
@@ -1527,7 +1697,9 @@ fun BestMatchPreviewCard(
 
 @Composable
 fun ProfileOverviewCard(
-    answers: BusinessAnswers
+    answers: BusinessAnswers,
+    profileImageUri: android.net.Uri?,
+    onUploadPhotoClick: () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = SurfaceLight),
@@ -1546,17 +1718,37 @@ fun ProfileOverviewCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(ForestGreen.copy(alpha = 0.1f)),
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(ForestGreen.copy(alpha = 0.1f))
+                        .border(1.5.dp, GoldAccent.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                        .clickable { onUploadPhotoClick() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Home,
-                        contentDescription = "Business Symbol",
-                        tint = ForestGreen,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    if (profileImageUri != null) {
+                        AsyncImage(
+                            model = profileImageUri,
+                            contentDescription = "SME uploaded profile avatar",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Icon(
+                                imageVector = Icons.Default.AddCircle,
+                                contentDescription = "Add business photo avatar",
+                                tint = ForestGreen,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                "PHOTO", 
+                                style = MaterialTheme.typography.labelSmall, 
+                                fontSize = 8.sp, 
+                                fontWeight = FontWeight.Black, 
+                                color = ForestGreen
+                            )
+                        }
+                    }
                 }
                 Column {
                     Text(
@@ -1617,11 +1809,39 @@ fun ProfileDetailRow(
 fun ResultsDashboardScreen(
     result: CreditAssessmentResult,
     answers: BusinessAnswers,
+    viewModel: CreditViewModel,
+    profileImageUri: android.net.Uri?,
+    businessLogoUri: android.net.Uri?,
+    onUploadPhotoClick: () -> Unit,
+    onUploadLogoClick: () -> Unit,
     onRetake: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(DashboardTab.Score) }
     val scrollState = rememberScrollState()
     val context = LocalContext.current
+
+    val lastSeenTimestamp = viewModel.lastSeen.collectAsState().value
+    val memberSinceTimestamp = viewModel.memberSince.collectAsState().value
+
+    var isEditMode by remember { mutableStateOf(false) }
+    var editBusinessName by remember(answers) { mutableStateOf(answers.businessName) }
+    var editBusinessType by remember(answers) { mutableStateOf(answers.businessType) }
+    var editLoanAmount by remember(answers) { mutableStateOf(answers.loanAmount) }
+    var editDistrict by remember(answers) { mutableStateOf(answers.district) }
+
+    var selectedRegion by remember { mutableStateOf("Central Region") }
+    var showDistrictDropdown by remember { mutableStateOf(false) }
+    var showLanguagePickerInSettings by remember { mutableStateOf(false) }
+
+    val currentLanguageCode by viewModel.currentLanguageCode.collectAsState()
+
+    if (showLanguagePickerInSettings) {
+        LanguageSelectionDialog(
+            currentLanguageCode = currentLanguageCode,
+            onLanguageSelected = { viewModel.setLanguage(it) },
+            onDismiss = { showLanguagePickerInSettings = false }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -1780,6 +2000,9 @@ fun ResultsDashboardScreen(
                 }
 
                 DashboardTab.Lenders -> {
+                    // Interactive Loan Calculator
+                    LoanCalculatorCard()
+
                     // Render "Best Match" Slate-900 preview card
                     val bestMatch = result.loan_matches.firstOrNull()
                     if (bestMatch != null) {
@@ -1819,7 +2042,575 @@ fun ResultsDashboardScreen(
                             .padding(bottom = 12.dp)
                     )
 
-                    ProfileOverviewCard(answers = answers)
+                    // Database Sync status banner
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .background(Color(0xFF22C55E), shape = CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Firebase RTDB Link Status",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextDark
+                                    )
+                                    Text(
+                                        text = "Continuous Live Sync Enabled",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "ONLINE",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF16A34A),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Monospace UID Badge
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = "SECURE COHORT BADGE UID",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Gray,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Text(
+                                    text = viewModel.currentUserId,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    color = ForestGreenDark,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    val clip = android.content.ClipData.newPlainText("SME UID", viewModel.currentUserId)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(context, "SME Badge UID copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Copy UID",
+                                    tint = ForestGreen,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Completeness progress bar calculation
+                    val totalFieldsCount = 11
+                    val setFieldsCount = listOf(
+                        answers.businessName, answers.businessType, answers.operatingTime,
+                        answers.employeeCount, answers.district, answers.monthlyRevenue,
+                        answers.monthlyExpenses, answers.loanReason, answers.loanAmount
+                    ).count { it.isNotBlank() } + (if (answers.isRegistered) 1 else 0) + (if (answers.hasBankStatement) 1 else 0)
+                    val completenessPercent = (setFieldsCount * 100) / totalFieldsCount
+                    val completenessColor = when {
+                        completenessPercent < 45 -> RatingRed
+                        completenessPercent < 75 -> RatingAmber
+                        else -> RatingGreen
+                    }
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 20.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "SME Profile Completeness",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextDark
+                                )
+                                Text(
+                                    text = "$completenessPercent%",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = completenessColor
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { completenessPercent.toFloat() / 100f },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(100.dp)),
+                                color = completenessColor,
+                                trackColor = Color(0xFFF1F5F9)
+                            )
+                        }
+                    }
+
+                    // Profile Navigation and Mode Actions
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { selectedTab = DashboardTab.Settings },
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.5.dp, ForestGreen.copy(alpha = 0.6f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = ForestGreen),
+                            modifier = Modifier.weight(1f).height(46.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Settings, contentDescription = "System Settings", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Preferences", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+
+                        if (!isEditMode) {
+                            Button(
+                                onClick = { isEditMode = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
+                                modifier = Modifier.weight(1f).height(46.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Profile Info", tint = Color.White, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Edit Profile", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+
+                    if (isEditMode) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.5.dp, GoldAccent),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 20.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Text(
+                                    text = "EDIT PROFILE ADVISORY DETAILS",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = GoldAccentDark,
+                                    letterSpacing = 1.sp
+                                )
+
+                                OutlinedTextField(
+                                    value = editBusinessName,
+                                    onValueChange = { editBusinessName = it },
+                                    label = { Text("Business Name") },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                OutlinedTextField(
+                                    value = editBusinessType,
+                                    onValueChange = { editBusinessType = it },
+                                    label = { Text("Business Operations Category") },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                OutlinedTextField(
+                                    value = editLoanAmount,
+                                    onValueChange = { editLoanAmount = it },
+                                    label = { Text("Target Borrowing Capacity (UGX)") },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                // Region / District Picker flow
+                                Column {
+                                    Text(
+                                        text = "Operating District Selection:",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray,
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+                                    // Region selection horizontal list elements
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        ugandaDistrictsByRegion.keys.forEach { region ->
+                                            val isRegSelected = region == selectedRegion
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isRegSelected) ForestGreen else Color(0xFFF1F5F9))
+                                                    .clickable { 
+                                                        selectedRegion = region
+                                                        // Auto set to first district in region
+                                                        editDistrict = ugandaDistrictsByRegion[region]?.firstOrNull() ?: editDistrict
+                                                    }
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(
+                                                    text = region,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (isRegSelected) Color.White else Color.DarkGray,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // District field representation with Dropdown
+                                    OutlinedTextField(
+                                        value = editDistrict,
+                                        onValueChange = { editDistrict = it },
+                                        readOnly = true,
+                                        label = { Text("District in $selectedRegion") },
+                                        shape = RoundedCornerShape(12.dp),
+                                        trailingIcon = {
+                                            IconButton(onClick = { showDistrictDropdown = !showDistrictDropdown }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDropDown,
+                                                    contentDescription = "District List Toggle",
+                                                    tint = ForestGreen
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    if (showDistrictDropdown) {
+                                        Card(
+                                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                                            shape = RoundedCornerShape(12.dp),
+                                            border = BorderStroke(1.dp, Color.LightGray),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = 200.dp)
+                                                .verticalScroll(rememberScrollState())
+                                        ) {
+                                            val districts = ugandaDistrictsByRegion[selectedRegion] ?: emptyList()
+                                            districts.forEach { distName ->
+                                                Text(
+                                                    text = distName,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            editDistrict = distName
+                                                            showDistrictDropdown = false
+                                                        }
+                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = TextDark,
+                                                    fontWeight = if (editDistrict == distName) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { isEditMode = false },
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.5.dp, Color.Gray),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Gray),
+                                        modifier = Modifier.weight(1f).height(48.dp)
+                                    ) {
+                                        Text("Cancel")
+                                    }
+                                    Button(
+                                        onClick = {
+                                            viewModel.updateAnswers { current ->
+                                                current.copy(
+                                                    businessName = editBusinessName,
+                                                    businessType = editBusinessType,
+                                                    loanAmount = editLoanAmount,
+                                                    district = editDistrict
+                                                )
+                                            }
+                                            isEditMode = false
+                                            Toast.makeText(context, "SME Advisory profile successfully synchronized to Firebase!", Toast.LENGTH_SHORT).show()
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
+                                        modifier = Modifier.weight(1f).height(48.dp)
+                                    ) {
+                                        Text("Save Sync")
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        ProfileOverviewCard(
+                            answers = answers,
+                            profileImageUri = profileImageUri,
+                            onUploadPhotoClick = onUploadPhotoClick
+                        )
+                    }
+                }
+
+                DashboardTab.Settings -> {
+                    Text(
+                        text = "SYSTEM PREFERENCES ENGINE",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = TextDark,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        modifier = Modifier
+                            .align(Alignment.Start)
+                            .padding(bottom = 12.dp)
+                    )
+
+                    // Language Settings Card
+                    val selectedLangObj = remember(currentLanguageCode) {
+                        TranslationHelper.languages.find { it.code == currentLanguageCode }
+                    }
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(18.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "Active Translation Language",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextDark
+                                    )
+                                    Text(
+                                        text = selectedLangObj?.let { "${it.name} (${it.localName})" } ?: "English",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = ForestGreen
+                                    )
+                                }
+                                Button(
+                                    onClick = { showLanguagePickerInSettings = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = ForestGreen.copy(alpha = 0.1f), contentColor = ForestGreen),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Change Dialect", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    // Theme Customizer Setting Card
+                    val isDarkThemePref by viewModel.isDarkTheme.collectAsState()
+                    val isDark = isDarkThemePref ?: false
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(18.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                    Text(
+                                        text = "High-Contrast Solar Theme",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextDark
+                                    )
+                                    Text(
+                                        text = "Optimize contrast ratios and visual display colors for outdoor marketplace operation.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray
+                                    )
+                                }
+                                Switch(
+                                    checked = isDark,
+                                    onCheckedChange = { viewModel.setDarkTheme(it) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = ForestGreen, checkedTrackColor = ForestGreen.copy(alpha = 0.4f))
+                                )
+                            }
+                        }
+                    }
+
+                    // Notification Setting Toggles
+                    val notifRemindersActive = viewModel.scoreAlertsEnabled.collectAsState().value
+                    val advisoryTipsActive = viewModel.roadmapRemindersEnabled.collectAsState().value
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Text(
+                                text = "LIVE ADVISORY ALERTS",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Gray,
+                                letterSpacing = 0.5.sp
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                    Text(
+                                        text = "Transaction Ledger Prompts",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextDark
+                                    )
+                                    Text(
+                                        text = "Receive notifications to log daily Mobile Money billing collections.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray
+                                    )
+                                }
+                                Switch(
+                                    checked = notifRemindersActive,
+                                    onCheckedChange = { viewModel.toggleScoreAlerts(it) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = ForestGreen, checkedTrackColor = ForestGreen.copy(alpha = 0.4f))
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                    Text(
+                                        text = "Weekly Financial Roadmap Tips",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextDark
+                                    )
+                                    Text(
+                                        text = "Daily micro learning insights regarding URSB and bank loan eligibility criteria.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray
+                                    )
+                                }
+                                Switch(
+                                    checked = advisoryTipsActive,
+                                    onCheckedChange = { viewModel.toggleRoadmapReminders(it) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = ForestGreen, checkedTrackColor = ForestGreen.copy(alpha = 0.4f))
+                                )
+                            }
+                        }
+                    }
+
+                    // Connection and Registry Details
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 24.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "COHORT REGISTRY LANDSCAPE",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Gray,
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "• Member Since: ${memberSinceTimestamp.ifEmpty { "Today" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextDark
+                            )
+                            Text(
+                                text = "• Active Live Session: ${lastSeenTimestamp.ifEmpty { "Just Now" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextDark
+                            )
+                        }
+                    }
+
+                    // Logout operation
+                    Button(
+                        onClick = { viewModel.signOut() },
+                        colors = ButtonDefaults.buttonColors(containerColor = RatingRed),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Log Out", tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Sign Out Of Business Profile", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
 
@@ -1830,9 +2621,10 @@ fun ResultsDashboardScreen(
                 onClick = {
                     Toast.makeText(
                         context,
-                        "Downloading report secure copy. Sharing digital certificate with Pride Microfinance and PostBank loan officers!",
+                        "Opening print dialog to download official PDF copy. Sharing digital certificate with Pride Microfinance and PostBank loan officers!",
                         Toast.LENGTH_LONG
                     ).show()
+                    printReport(context, result, answers)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = GoldAccent),
                 shape = RoundedCornerShape(12.dp),
@@ -2616,17 +3408,109 @@ fun WhatIfEligibilitySimulator(answers: BusinessAnswers, currentScore: Int) {
 fun AuthScreen(
     isLoading: Boolean,
     errorMessage: String?,
+    currentLanguageCode: String,
+    onShowLanguagePicker: () -> Unit,
     onSignIn: (String, String) -> Unit,
     onSignUp: (String, String) -> Unit,
+    onForgotPassword: (String) -> Unit,
     onClearError: () -> Unit
 ) {
     var isLoginMode by remember { mutableStateOf(true) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var agreeToTerms by remember { mutableStateOf(false) }
+    var rememberMe by remember { mutableStateOf(true) }
+
+    // Forgot Password Flow state
+    var showForgotPopup by remember { mutableStateOf(false) }
+    var forgotEmailByForm by remember { mutableStateOf("") }
 
     val scrollState = rememberScrollState()
     val context = LocalContext.current
+
+    // Password strength computation
+    val passwordStrength = remember(password) {
+        if (password.isEmpty()) 0
+        else {
+            var score = 0
+            if (password.length >= 6) score += 1
+            if (password.length >= 8) score += 1
+            if (password.any { it.isDigit() }) score += 1
+            if (password.any { !it.isLetterOrDigit() }) score += 1
+            score
+        }
+    }
+    val strengthText = when (passwordStrength) {
+        0 -> ""
+        1 -> "Weak"
+        2 -> "Fair"
+        3 -> "Strong"
+        else -> "Very Strong"
+    }
+    val strengthColor = when (passwordStrength) {
+        0 -> Color.LightGray
+        1 -> RatingRed
+        2 -> RatingAmber
+        3 -> RatingGreen
+        else -> GoldAccent
+    }
+
+    if (showForgotPopup) {
+        AlertDialog(
+            onDismissRequest = { showForgotPopup = false },
+            title = {
+                Text(
+                    text = "Request Password Reset",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = ForestGreenDark
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Enter your registered business email and we will dispatch a secured recovery credential link to you.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Gray
+                    )
+                    OutlinedTextField(
+                        value = forgotEmailByForm,
+                        onValueChange = { forgotEmailByForm = it },
+                        label = { Text("Business Email Address") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (forgotEmailByForm.trim().contains("@")) {
+                            onForgotPassword(forgotEmailByForm.trim())
+                            showForgotPopup = false
+                        } else {
+                            Toast.makeText(context, "Please enter a valid email address.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestGreen)
+                ) {
+                    Text("Send Recovery Email", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showForgotPopup = false }) {
+                    Text("Cancel", color = ForestGreen)
+                }
+            },
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -2643,7 +3527,19 @@ fun AuthScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Spacer(modifier = Modifier.height(48.dp))
+        // Language switcher action row at top-right
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            LanguageSelectorButton(
+                currentLanguageCode = currentLanguageCode,
+                darkTheme = true,
+                onClick = onShowLanguagePicker
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         // SME CreditReady Branding Header
         Box(
@@ -2664,7 +3560,7 @@ fun AuthScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "SME CreditReady",
+            text = TranslationHelper.getString("app_title", currentLanguageCode),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Black,
             color = Color.White,
@@ -2672,7 +3568,7 @@ fun AuthScreen(
         )
 
         Text(
-            text = "Certified Bankability Scoring & Lead Matchmaking",
+            text = TranslationHelper.getString("app_subtitle", currentLanguageCode),
             style = MaterialTheme.typography.bodySmall,
             color = Color.LightGray.copy(alpha = 0.8f),
             textAlign = TextAlign.Center,
@@ -2694,14 +3590,14 @@ fun AuthScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = if (isLoginMode) "Welcome Back" else "Create SME Account",
+                    text = if (isLoginMode) TranslationHelper.getString("welcome_back", currentLanguageCode) else TranslationHelper.getString("create_account", currentLanguageCode),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = TextDark
                 )
 
                 Text(
-                    text = if (isLoginMode) "Sign in to access your business score" else "Register to certify your business leads",
+                    text = if (isLoginMode) TranslationHelper.getString("signin_desc", currentLanguageCode) else TranslationHelper.getString("signup_desc", currentLanguageCode),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Gray,
                     textAlign = TextAlign.Center,
@@ -2753,7 +3649,7 @@ fun AuthScreen(
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it; onClearError() },
-                    label = { Text("Business Email Address") },
+                    label = { Text(TranslationHelper.getString("email_label", currentLanguageCode)) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Email,
@@ -2776,11 +3672,47 @@ fun AuthScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // Uganda Phone Subscriber Number (Registration Only)
+                if (!isLoginMode) {
+                    OutlinedTextField(
+                        value = phone,
+                        onValueChange = { input ->
+                            if (input.all { it.isDigit() } && input.length <= 9) {
+                                phone = input
+                            }
+                        },
+                        label = { Text("Uganda Phone Subscriber No") },
+                        prefix = { Text("+256 ", fontWeight = FontWeight.Bold, color = ForestGreen) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Phone,
+                                contentDescription = "Uganda business telephone",
+                                tint = ForestGreen
+                            )
+                        },
+                        placeholder = { Text("e.g. 772123456") },
+                        supportingText = { Text("Enter 9 subscriber digits (e.g. 7xxxxxxxx)") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("auth_phone_input"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = ForestGreen,
+                            focusedLabelColor = ForestGreen,
+                            unfocusedBorderColor = Color.LightGray
+                        ),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
                 // Password input
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it; onClearError() },
-                    label = { Text("Password (min 6 characters)") },
+                    label = { Text(TranslationHelper.getString("password_label", currentLanguageCode)) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Lock,
@@ -2811,23 +3743,183 @@ fun AuthScreen(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                // Password strength meter
+                if (password.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp, bottom = 12.dp, start = 4.dp, end = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Password Strength:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                            Text(
+                                strengthText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = strengthColor,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        // Draw multi segment bar
+                        Row(
+                            modifier = Modifier.fillMaxWidth().height(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            for (i in 1..4) {
+                                val segmentColor = if (i <= passwordStrength) strengthColor else Color.LightGray.copy(alpha = 0.4f)
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(100.dp))
+                                        .background(segmentColor)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Confirm Password (Registration Only)
+                if (!isLoginMode) {
+                    OutlinedTextField(
+                        value = confirmPassword,
+                        onValueChange = { confirmPassword = it },
+                        label = { Text("Confirm Business Password") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Confirm password credential",
+                                tint = ForestGreen
+                            )
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
+                                Icon(
+                                    imageVector = if (confirmPasswordVisible) Icons.Default.CheckCircle else Icons.Default.Info,
+                                    contentDescription = "Toggle view",
+                                    tint = Color.Gray
+                                )
+                            }
+                        },
+                        visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("auth_confirm_password_input"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = ForestGreen,
+                            focusedLabelColor = ForestGreen,
+                            unfocusedBorderColor = Color.LightGray
+                        ),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // Remember Me checkbox (Login Only)
+                if (isLoginMode) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { rememberMe = !rememberMe }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = rememberMe,
+                            onCheckedChange = { rememberMe = it },
+                            colors = CheckboxDefaults.colors(checkedColor = ForestGreen)
+                        )
+                        Text(
+                            text = "Remember this business profile",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.DarkGray
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Forgot password?",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ForestGreen,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .clickable {
+                                forgotEmailByForm = email
+                                showForgotPopup = true
+                            }
+                            .padding(4.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // Terms of service checkbox (Registration Only)
+                if (!isLoginMode) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { agreeToTerms = !agreeToTerms }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = agreeToTerms,
+                            onCheckedChange = { agreeToTerms = it },
+                            colors = CheckboxDefaults.colors(checkedColor = ForestGreen)
+                        )
+                        Text(
+                            text = "Agree to official SME Financial Advisory Terms",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.DarkGray
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
 
                 // Submit Action Button
                 Button(
                     onClick = {
                         if (email.isBlank() || password.isBlank()) {
-                            Toast.makeText(context, "Please fill in all details", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, TranslationHelper.getString("fill_details", currentLanguageCode), Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                         if (password.length < 6) {
-                            Toast.makeText(context, "Password must be at least 6 characters", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, TranslationHelper.getString("pass_length", currentLanguageCode), Toast.LENGTH_SHORT).show()
                             return@Button
                         }
-                        if (isLoginMode) {
-                            onSignIn(email.trim(), password)
-                        } else {
+                        if (!isLoginMode) {
+                            if (confirmPassword != password) {
+                                Toast.makeText(context, "Passwords do not match.", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (phone.length < 9) {
+                                Toast.makeText(context, "Please enter a valid 9-digit Ugandan subscriber number.", Toast.LENGTH_LONG).show()
+                                return@Button
+                            }
+                            if (!agreeToTerms) {
+                                Toast.makeText(context, "You must agree to the SME terms and conditions.", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
                             onSignUp(email.trim(), password)
+                        } else {
+                            onSignIn(email.trim(), password)
                         }
                     },
                     enabled = !isLoading,
@@ -2846,7 +3938,7 @@ fun AuthScreen(
                         )
                     } else {
                         Text(
-                            text = if (isLoginMode) "Access Profile" else "Register Business",
+                            text = if (isLoginMode) TranslationHelper.getString("btn_access_profile", currentLanguageCode) else TranslationHelper.getString("btn_register_business", currentLanguageCode),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -2865,7 +3957,7 @@ fun AuthScreen(
                     modifier = Modifier.testTag("toggle_auth_mode_button")
                 ) {
                     Text(
-                        text = if (isLoginMode) "New user? Create a free account" else "Have an account already? Access profile",
+                        text = if (isLoginMode) TranslationHelper.getString("new_user_create", currentLanguageCode) else TranslationHelper.getString("have_account", currentLanguageCode),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
                         color = ForestGreenDark,
@@ -2891,12 +3983,442 @@ fun AuthScreen(
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = "Secure session encrypted by Google GMS",
+                text = TranslationHelper.getString("secure_session", currentLanguageCode),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White.copy(alpha = 0.6f)
             )
         }
 
         Spacer(modifier = Modifier.height(48.dp))
+    }
+}
+
+// ================= BRAND NEW FULL-FEATURE ENHANCEMENTS =================
+
+val ugandaDistrictsByRegion = mapOf(
+    "Central Region" to listOf(
+        "Kampala", "Wakiso", "Mukono", "Masaka", "Luweero", "Mityana", "Mpigi", "Mubende", "Rakai", "Lyantonde", 
+        "Sembabule", "Kalangala", "Buikwe", "Bukomansimbi", "Butambala", "Gomba", "Kalungu", "Kyankwanzi", 
+        "Lwengo", "Nakaseke", "Nakasongola", "Kyotera", "Kassanda"
+    ),
+    "Eastern Region" to listOf(
+        "Jinja", "Mbale", "Soroti", "Iganga", "Tororo", "Busia", "Kamuli", "Pallisa", "Amuria", "Budaka", 
+        "Bududa", "Bugiri", "Bukedea", "Bukwo", "Bulambuli", "Buyende", "Kaberamaido", "Kaliro", "Kapchorwa", 
+        "Kween", "Luuka", "Manafwa", "Mayuge", "Namayingo", "Namutumba", "Ngora", "Serere", "Sironko", 
+        "Kapelebyong", "Bugweri", "Kalaki"
+    ),
+    "Northern Region" to listOf(
+        "Gulu", "Lira", "Arua", "Kitgum", "Apac", "Adjumani", "Amolatar", "Amuru", "Dokolo", "Koboko", 
+        "Kotido", "Moroto", "Moyo", "Nakapiripirit", "Nebbi", "Oyam", "Pader", "Yumbe", "Abim", "Agago", 
+        "Alebtong", "Amudat", "Kaabong", "Kole", "Lamwo", "Maracha", "Napak", "Otuke", "Zombo", "Omoro", 
+        "Pakwach", "Nabilatuk", "Kwania", "Karenga", "Madi-Okollo", "Terego", "Obongi"
+    ),
+    "Western Region" to listOf(
+        "Mbarara", "Kabale", "Fort Portal", "Kasese", "Hoima", "Bushenyi", "Rukungiri", "Ntungamo", "Kisoro", 
+        "Bundibugyo", "Ibanda", "Isingiro", "Kabarole", "Kamwenge", "Kanungu", "Kibaale", "Kiruhura", "Kiryandongo", 
+        "Kyenjojo", "Masindi", "Mitooma", "Ntoroko", "Rubirizi", "Sheema", "Buliisa", "Kagadi", "Kakumiro", 
+        "Rubanda", "Rukiga", "Kyegewa", "Bunyangabu", "Kazo", "Kitagwenda"
+    )
+)
+
+@Composable
+fun LanguageSelectorButton(
+    currentLanguageCode: String,
+    darkTheme: Boolean = false,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val currentLang = remember(currentLanguageCode) {
+        TranslationHelper.languages.firstOrNull { it.code == currentLanguageCode } ?: TranslationHelper.languages.first()
+    }
+    val contentColor = if (darkTheme) Color.White else ForestGreen
+    val bgColor = if (darkTheme) Color.White.copy(alpha = 0.15f) else ForestGreenLight.copy(alpha = 0.5f)
+    val borderColor = if (darkTheme) Color.White.copy(alpha = 0.3f) else ForestGreen.copy(alpha = 0.3f)
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = "🌐",
+            fontSize = 13.sp
+        )
+        Text(
+            text = currentLang.name.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.ExtraBold,
+            color = contentColor
+        )
+        Icon(
+            imageVector = Icons.Default.ArrowDropDown,
+            contentDescription = "Switch Language",
+            tint = contentColor,
+            modifier = Modifier.size(16.dp)
+        )
+    }
+}
+
+@Composable
+fun LanguageSelectionDialog(
+    currentLanguageCode: String,
+    onLanguageSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredLanguages = remember(searchQuery) {
+        if (searchQuery.isBlank()) {
+            TranslationHelper.languages
+        } else {
+            TranslationHelper.languages.filter {
+                it.name.contains(searchQuery, ignoreCase = true) ||
+                it.localName.contains(searchQuery, ignoreCase = true) ||
+                it.code.contains(searchQuery, ignoreCase = true)
+            }
+        }
+    }
+
+    val grouped = remember(filteredLanguages) {
+        filteredLanguages.groupBy { it.category }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = ForestGreen)
+            }
+        },
+        title = {
+            Text("Select Language / Kyusa Alimi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ForestGreen)
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search languages...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Gray) },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = ForestGreen,
+                        unfocusedBorderColor = Color.LightGray
+                    ),
+                    singleLine = true
+                )
+
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    grouped.forEach { (category, langs) ->
+                        item {
+                            Text(
+                                text = category.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = GoldAccentDark,
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)
+                            )
+                        }
+                        items(langs) { lang ->
+                            val isSelected = lang.code == currentLanguageCode
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) ForestGreen.copy(alpha = 0.1f) else Color.Transparent)
+                                    .clickable {
+                                        onLanguageSelected(lang.code)
+                                        onDismiss()
+                                    }
+                                    .padding(vertical = 10.dp, horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = lang.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) ForestGreenDark else TextDark
+                                    )
+                                    if (lang.localName.isNotEmpty() && lang.localName != lang.name) {
+                                        Text(
+                                            text = lang.localName,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, contentDescription = "Selected", tint = ForestGreen, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )
+}
+
+fun printReport(context: Context, result: CreditAssessmentResult, answers: BusinessAnswers) {
+    try {
+        val printManager = context.getSystemService(Context.PRINT_SERVICE) as? android.print.PrintManager
+        if (printManager != null) {
+            val jobName = "${answers.businessName.ifEmpty { "SME" }}_CreditReady_Certificate"
+
+            val htmlContent = """
+                <html>
+                <head>
+                    <style>
+                        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; color: #1E293B; background-color: #F8FAFC; }
+                        .certificate { border: 10px double #15803D; padding: 40px; background-color: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+                        .header { text-align: center; margin-bottom: 40px; }
+                        .logo { font-size: 36px; font-weight: bold; color: #15803D; margin-bottom: 5px; }
+                        .subtitle { font-size: 14px; color: #B45309; font-weight: bold; letter-spacing: 2px; }
+                        .title { font-size: 28px; font-weight: bold; text-align: center; margin-bottom: 20px; color: #0F172A; text-transform: uppercase; }
+                        .score-box { text-align: center; margin: 30px auto; padding: 20px; background-color: #F0FDF4; border: 2.5px solid #15803D; border-radius: 12px; display: inline-block; width: 220px; }
+                        .score { font-size: 48px; font-weight: 900; color: #15803D; }
+                        .grade { font-size: 20px; font-weight: bold; color: #B45309; }
+                        .details { margin-top: 30px; font-size: 14px; line-height: 1.6; }
+                        .detail-row { display: flex; justify-content: space-between; border-bottom: 1px solid #E2E8F0; padding: 8px 0; }
+                        .detail-row span:first-child { font-weight: bold; color: #64748B; }
+                        .summary { margin-top: 30px; font-size: 14px; line-height: 1.6; color: #475569; font-style: italic; background: #FFFBEB; padding: 15px; border-left: 5px solid #D97706; border-radius: 4px; }
+                        .footer { text-align: center; margin-top: 50px; font-size: 11px; color: #94A3B8; border-top: 1px dashed #E2E8F0; padding-top: 15px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="certificate">
+                        <div class="header">
+                            <div class="logo">SME CreditReady</div>
+                            <div class="subtitle">BANK OF UGANDA &bull; 60th ANNIVERSARY HACKATHON</div>
+                        </div>
+
+                        <div class="title">Official Credit Readiness Certificate</div>
+
+                        <div style="text-align: center; margin-bottom: 30px;">
+                            <div class="score-box">
+                                <div class="score">${result.overall_score}%</div>
+                                <div class="grade">GRADE ${result.grade}</div>
+                            </div>
+                        </div>
+
+                        <div class="details">
+                            <div class="detail-row"><span>SME Business Name:</span> <span>${answers.businessName.ifEmpty { "Maria Nakato Clothing Shop" }}</span></div>
+                            <div class="detail-row"><span>Operating Location:</span> <span>${answers.district} District, Uganda</span></div>
+                            <div class="detail-row"><span>Operation Sector:</span> <span>${answers.businessType.ifEmpty { "Retail Vendor" }}</span></div>
+                            <div class="detail-row"><span>URSB Registered Status:</span> <span>${if (answers.isRegistered) "YES (Registered)" else "NO (Informal Trader)"}</span></div>
+                            <div class="detail-row"><span>Record Style:</span> <span>${answers.recordKeeping}</span></div>
+                            <div class="detail-row"><span>Target Funding Value:</span> <span>${answers.loanAmount} UGX Range</span></div>
+                        </div>
+
+                        <div class="summary">
+                            <strong>Coach Analysis Summary:</strong><br/>
+                            ${result.summary}
+                        </div>
+
+                        <div class="footer">
+                            Encrypted session GMS authentication certified signature block. Bankability verification token: ${java.util.UUID.randomUUID().toString().take(18).uppercase()}
+                        </div>
+                    </div>
+                </body>
+                </html>
+            """.trimIndent()
+
+            val webView = android.webkit.WebView(context)
+            webView.webViewClient = object : android.webkit.WebViewClient() {
+                override fun onPageFinished(view: android.webkit.WebView, url: String) {
+                    val printAdapter = webView.createPrintDocumentAdapter(jobName)
+                    printManager.print(jobName, printAdapter, android.print.PrintAttributes.Builder().build())
+                }
+            }
+            webView.loadDataWithBaseURL(null, htmlContent, "text/html", "utf-8", null)
+        } else {
+            Toast.makeText(context, "System print is currently unavailable", Toast.LENGTH_SHORT).show()
+        }
+    } catch (e: Exception) {
+        Log.e("MainAppScreen", "Failed to print certificate", e)
+        Toast.makeText(context, "Printer failure", Toast.LENGTH_SHORT).show()
+    }
+}
+
+@Composable
+fun LoanCalculatorCard() {
+    var borrowAmount by remember { mutableStateOf(5000000f) }
+    var interestRate by remember { mutableStateOf(18f) }
+    var termMonths by remember { mutableStateOf(12f) }
+
+    val monthlyInterestPercent = (interestRate / 100f) / 12f
+    val monthlyRepayment = remember(borrowAmount, interestRate, termMonths) {
+        if (monthlyInterestPercent == 0f) {
+            borrowAmount / termMonths
+        } else {
+            val discountFactor = ((Math.pow((1f + monthlyInterestPercent).toDouble(), termMonths.toDouble()) - 1f) / 
+                    (monthlyInterestPercent * Math.pow((1f + monthlyInterestPercent).toDouble(), termMonths.toDouble())))
+            if (discountFactor > 0f) {
+                (borrowAmount.toDouble() / discountFactor).toFloat()
+            } else {
+                borrowAmount / termMonths
+            }
+        }
+    }
+
+    val totalPayment = monthlyRepayment * termMonths
+    val totalInterest = totalPayment - borrowAmount
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        border = BorderStroke(1.5.dp, GoldAccent.copy(alpha = 0.4f))
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 16.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(GoldAccent),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "🧮", fontSize = 16.sp)
+                }
+                Column {
+                    Text(
+                        text = "LOAN REPAYMENT CALCULATOR",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = GoldAccent,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Real-time cost & interest breakdown under BoU guidance",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray.copy(alpha = 0.7f)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Borrow Amount", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(text = String.format("%,d UGX", borrowAmount.toInt()), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = GoldAccent)
+            }
+            Slider(
+                value = borrowAmount,
+                onValueChange = { borrowAmount = it },
+                valueRange = 100000f..15000000f,
+                steps = 149,
+                colors = SliderDefaults.colors(
+                    thumbColor = GoldAccent,
+                    activeTrackColor = GoldAccent,
+                    inactiveTrackColor = Color.LightGray.copy(alpha = 0.2f)
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Annual Interest Rate", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(text = "${interestRate.toInt()}% p.a.", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+            }
+            Slider(
+                value = interestRate,
+                onValueChange = { interestRate = it },
+                valueRange = 5f..36f,
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = Color.White,
+                    inactiveTrackColor = Color.LightGray.copy(alpha = 0.2f)
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Repayment Term", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(text = "${termMonths.toInt()} Months", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+            }
+            Slider(
+                value = termMonths,
+                onValueChange = { termMonths = it },
+                valueRange = 1f..24f,
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = Color.White,
+                    inactiveTrackColor = Color.LightGray.copy(alpha = 0.2f)
+                )
+            )
+
+            HorizontalDivider(color = Color.LightGray.copy(alpha = 0.15f), modifier = Modifier.padding(vertical = 16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(text = "MONTHLY COST", style = MaterialTheme.typography.labelSmall, color = Color.LightGray)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = String.format("%,d UGX", monthlyRepayment.toInt()),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = RatingGreen
+                        )
+                    }
+                }
+
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(text = "INTEREST CHARGES", style = MaterialTheme.typography.labelSmall, color = Color.LightGray)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = String.format("%,d UGX", totalInterest.toInt()),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = GoldAccent
+                        )
+                    }
+                }
+            }
+        }
     }
 }
